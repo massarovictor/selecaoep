@@ -1,19 +1,23 @@
 import React, { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { CourseView } from './components/CourseView';
+import { GeneralStats } from './components/GeneralStats';
 import { processCSV } from './utils';
 import { generatePDF, generateXLS, generateDOC } from './export';
 import { ProcessingSummary, Course } from './types';
-import { School, FileText, FileSpreadsheet, RefreshCw, File } from 'lucide-react';
+import { Trophy, FileText, FileSpreadsheet, RefreshCw, File } from 'lucide-react';
+
+type Tab = 'GERAL' | Course;
 
 const App: React.FC = () => {
   const [data, setData] = useState<ProcessingSummary | null>(null);
-  const [activeTab, setActiveTab] = useState<Course>(Course.ADMINISTRACAO);
+  const [activeTab, setActiveTab] = useState<Tab>('GERAL');
 
   const handleFileUpload = (content: string) => {
     try {
       const result = processCSV(content);
       setData(result);
+      setActiveTab('GERAL');
     } catch (error) {
       console.error(error);
       alert('Erro ao processar o arquivo CSV. Verifique o formato.');
@@ -23,6 +27,7 @@ const App: React.FC = () => {
   const handleReset = () => {
     if(confirm("Deseja carregar um novo arquivo? Os dados atuais serão perdidos.")) {
       setData(null);
+      setActiveTab('GERAL');
     }
   }
 
@@ -33,11 +38,10 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="bg-white p-2 rounded-full">
-              <School className="w-6 h-6 text-green-700" />
+              <Trophy className="w-6 h-6 text-green-700" />
             </div>
             <div>
-              <h1 className="text-xl font-bold leading-none">SIS-SELEÇÃO EEEP 2026</h1>
-              <p className="text-xs text-green-100 mt-1 opacity-90">EEEP Maria Célia Pinheiro Falcão • Edital Nº 003/2025</p>
+              <h1 className="text-xl font-bold leading-none">SIS Seleção EEEP</h1>
             </div>
           </div>
           {data && (
@@ -127,7 +131,19 @@ const App: React.FC = () => {
             {/* Course Tabs */}
             <div className="mb-8 border-b border-gray-200 print:hidden overflow-x-auto">
               <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-                {Object.values(Course).map((course) => (
+                <button
+                  key="GERAL"
+                  onClick={() => setActiveTab('GERAL')}
+                  className={`
+                      whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors
+                      ${activeTab === 'GERAL'
+                        ? 'border-green-500 text-green-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}
+                    `}
+                >
+                  Visão Geral
+                </button>
+                {(Object.values(Course) as Course[]).map((course) => (
                   <button
                     key={course}
                     onClick={() => setActiveTab(course)}
@@ -147,15 +163,19 @@ const App: React.FC = () => {
             {/* Print Header (Visible only on print) */}
             <div className="hidden print:block mb-8 text-center border-b pb-4">
                <h2 className="text-2xl font-bold">RESULTADO PRELIMINAR - SELEÇÃO EEEP 2026</h2>
-               <h3 className="text-xl mt-2">{activeTab}</h3>
+               <h3 className="text-xl mt-2">{activeTab === 'GERAL' ? 'VISÃO GERAL' : activeTab}</h3>
             </div>
 
             {/* Active Course View */}
-            {data.results
-              .filter(r => r.course === activeTab)
-              .map(r => (
-                <CourseView key={r.course} result={r} />
-              ))}
+            {activeTab === 'GERAL' ? (
+              <GeneralStats data={data} />
+            ) : (
+              data.results
+                .filter(r => r.course === activeTab)
+                .map(r => (
+                  <CourseView key={r.course} result={r} />
+                ))
+            )}
           </div>
         )}
       </main>
@@ -163,7 +183,7 @@ const App: React.FC = () => {
       {/* Footer */}
       <footer className="bg-white border-t mt-12 py-6 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-gray-500">
-          <p>© 2025 EEEP Professora Maria Célia Pinheiro Falcão. Sistema desenvolvido para o Processo Seletivo 2026.</p>
+          <p>© 2025 EEEP Professora Maria Célia Pinheiro Falcão • Desenvolvido por Massaro Victor.</p>
         </div>
       </footer>
     </div>

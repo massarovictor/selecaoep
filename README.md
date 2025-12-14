@@ -2,25 +2,29 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# SIS Seleção EEEP
 
-This contains everything you need to run your app locally.
+App web (Vite + React + TypeScript) para processar inscrições do Google Forms e gerar listas de classificação por curso e modalidade (cotas), com exportação em PDF/XLS/DOC.
 
-View your app in AI Studio: https://ai.studio/apps/drive/16w4mOzyA5he7t9u7IEguj_5WQiotov5H
+## O que o sistema faz
+- Importa arquivos `CSV` ou `XLS/XLSX` (primeira aba) exportados do Google Forms.
+- Calcula a nota final a partir das médias do 6º ao 9º ano e aplica critérios de desempate (idade, Português, Matemática).
+- Organiza os candidatos por curso e listas (PCD, Pública/Privada e Centro/Ampla), exibindo **classificados** e **classificáveis**.
+- Mostra uma aba de **Visão Geral** com estatísticas e notas de corte (último classificado) por curso/lista.
+- Exporta o resultado em **PDF**, **Excel** e **Word**.
 
-## O que o app faz
-- Processa inscrições do edital 003/2025 por curso e cotas (PCD, pública local/ampla, privada local/ampla) com remanejamentos previstos.
-- Aceita uploads em CSV ou XLS/XLSX (primeira aba) do Google Forms.
-- Mostra notas com separador decimal **vírgula** na interface e nas exportações.
-- Exporta resultado com posição, inscrição, nome e situação (classificado/classificável) para PDF, XLS e DOC.
+> Observação: o processamento é feito no navegador; os dados não precisam ser enviados para um servidor.
 
-## Run Locally
+## Como rodar localmente
+**Pré-requisito:** Node.js
 
-**Prerequisites:**  Node.js
+1. Instale as dependências: `npm install`
+2. Rode o servidor de desenvolvimento: `npm run dev`
+3. Acesse: `http://localhost:3000`
 
+Outros comandos úteis:
+- Build: `npm run build`
+- Preview do build: `npm run preview`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Licença
+MIT. Veja `LICENSE`.

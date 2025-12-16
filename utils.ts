@@ -6,10 +6,10 @@ type GradeResult = { value: number; warning?: string };
 // Parsing Helper with Validation
 const parseGrade = (val: string): GradeResult => {
   if (!val) return { value: 0 };
-  
+
   const clean = val.replace(/"/g, '').replace(',', '.').trim();
   let num = parseFloat(clean);
-  
+
   if (isNaN(num)) return { value: 0 };
 
   if (num > 10) {
@@ -33,10 +33,10 @@ const parseDate = (dateStr: string): Date => {
 const normalizeText = (str: string): string => {
   return str
     ? str
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toUpperCase()
-        .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .trim()
     : "";
 };
 
@@ -108,10 +108,10 @@ export const processCSV = (csvText: string): ProcessingSummary => {
 
     const schoolRaw = normalizeText(getValue(row, ["ESCOLA DE ORIGEM"]));
     const network = schoolRaw.includes("PRIVADA") ? Network.PRIVATE : Network.PUBLIC;
-    
+
     const neighborhoodRaw = getValue(row, ["BAIRRO"]);
     const neighborhoodNormalized = normalizeText(neighborhoodRaw);
-    const isLocal = neighborhoodNormalized.includes("CENTRO"); 
+    const isLocal = neighborhoodNormalized.includes("CENTRO");
 
     const quotaRaw = getValue(row, ["COTA DE ESCOLHA"]);
     const quotaNormalized = normalizeText(quotaRaw);
@@ -126,7 +126,7 @@ export const processCSV = (csvText: string): ProcessingSummary => {
       const r6 = getGradeValue(row, sub, "6º ANO");
       const r7 = getGradeValue(row, sub, "7º ANO");
       const r8 = getGradeValue(row, sub, "8º ANO");
-      
+
       if (r6.warning) warnings.push(`${sub} 6º: ${r6.warning}`);
       if (r7.warning) warnings.push(`${sub} 7º: ${r7.warning}`);
       if (r8.warning) warnings.push(`${sub} 8º: ${r8.warning}`);
@@ -145,7 +145,7 @@ export const processCSV = (csvText: string): ProcessingSummary => {
       const b1 = getGradeValue(row, sub, "1º BIMESTRE");
       const b2 = getGradeValue(row, sub, "2º BIMESTRE");
       const b3 = getGradeValue(row, sub, "3º BIMESTRE");
-      
+
       if (b1.warning) warnings.push(`${sub} 9º-B1: ${b1.warning}`);
       if (b2.warning) warnings.push(`${sub} 9º-B2: ${b2.warning}`);
       if (b3.warning) warnings.push(`${sub} 9º-B3: ${b3.warning}`);
@@ -187,7 +187,7 @@ export const processCSV = (csvText: string): ProcessingSummary => {
       avgMat,
       finalScore,
       warnings,
-      rank: 0 
+      rank: 0
     };
   });
 
@@ -203,140 +203,219 @@ export const processCSV = (csvText: string): ProcessingSummary => {
 };
 
 const processCourse = (course: Course, candidates: Student[]): CourseResult => {
+  // ========================================
+  // FASE 1: PREPARAÇÃO
+  // ========================================
+
+  // Ordenar todos por nota (critérios de desempate: idade, português, matemática)
   const sorted = [...candidates].sort((a, b) => {
     if (Math.abs(b.finalScore - a.finalScore) > 0.0001) return b.finalScore - a.finalScore;
     if (a.birthDate.getTime() !== b.birthDate.getTime()) {
-      return a.birthDate.getTime() - b.birthDate.getTime(); 
+      return a.birthDate.getTime() - b.birthDate.getTime(); // mais velho primeiro
     }
     if (Math.abs(b.avgPort - a.avgPort) > 0.0001) return b.avgPort - a.avgPort;
     return b.avgMat - a.avgMat;
   });
 
-  // Capacidades do Anexo I (turmas de 45 vagas)
-  const PCD_SLOTS = 2;
-  const PUBLIC_TOTAL = 34;
-  const PUBLIC_LOCAL = 10; // 30% da pública
-  const PRIVATE_TOTAL = 9;
-  const PRIVATE_LOCAL = 3; // 30% da privada
+  // Determinar elegibilidades para cada candidato (Art. 7º, § 1º - Lei 15.142/2025)
+  sorted.forEach(student => {
+    const eligibilities: ('PCD' | 'PUBLICA_CENTRO' | 'PUBLICA_AMPLA' | 'PRIVADA_CENTRO' | 'PRIVADA_AMPLA')[] = [];
 
+    if (student.schoolNetwork === Network.PUBLIC) {
+      eligibilities.push('PUBLICA_AMPLA');
+      if (student.isLocal) {
+        eligibilities.push('PUBLICA_CENTRO');
+      }
+    } else {
+      eligibilities.push('PRIVADA_AMPLA');
+      if (student.isLocal) {
+        eligibilities.push('PRIVADA_CENTRO');
+      }
+    }
+
+    if (student.isPCD) {
+      eligibilities.push('PCD');
+    }
+
+    student.eligibilities = eligibilities;
+  });
+
+  // Capacidades do Anexo I (turmas de 45 vagas)
+  const vacancies = {
+    pcd: 2,
+    publicaCentro: 10,
+    publicaAmpla: 24,
+    privadaCentro: 3,
+    privadaAmpla: 6
+  };
+
+  // Estruturas de resultado
   const selectedPCD: Student[] = [];
   const selectedPubLocal: Student[] = [];
   const selectedPubBroad: Student[] = [];
   const selectedPrivLocal: Student[] = [];
   const selectedPrivBroad: Student[] = [];
-  
+
   const selectedIds = new Set<string>();
 
-  const addToSelected = (list: Student[], student: Student, category: string) => {
+  // Helper para alocar candidato
+  const allocate = (student: Student, category: string, list: Student[]) => {
     student.status = 'SELECTED';
     student.selectedCategory = category;
+    student.allocatedIn = category;
     student.rank = list.length + 1;
     list.push(student);
     selectedIds.add(student.id);
   };
 
-  // Fase 1: PCD (5% do total). Sobras vão para rede pública (item 3.3).
-  const pcdEligible = sorted.filter(s => s.isPCD);
-  for (const s of pcdEligible) {
-    if (selectedPCD.length < PCD_SLOTS) {
-      addToSelected(selectedPCD, s, 'PCD');
+  // ========================================
+  // FASE 2: ALOCAÇÃO NA COTA PCD (PRIORIDADE MÁXIMA)
+  // ========================================
+  // Candidatos PCD tentam primeiro a cota PCD
+
+  for (const student of sorted) {
+    if (selectedIds.has(student.id)) continue;
+
+    if (student.isPCD && vacancies.pcd > 0) {
+      allocate(student, 'PCD', selectedPCD);
+      vacancies.pcd--;
     }
   }
-  const leftoverPCD = Math.max(PCD_SLOTS - selectedPCD.length, 0);
 
-  // Fase 2: Rede privada (20%). Local primeiro, depois ampla. Sobras locais migram para ampla da mesma rede.
-  const privLocalEligible = sorted.filter(s => 
-    !selectedIds.has(s.id) && 
-    s.schoolNetwork === Network.PRIVATE && 
-    s.isLocal
-  );
-  
-  for (const s of privLocalEligible) {
-    if (selectedPrivLocal.length < PRIVATE_LOCAL) {
-      addToSelected(selectedPrivLocal, s, 'PRIVADA - REGIÃO');
-    }
-  }
-  const privateBroadCapacity = Math.max(PRIVATE_TOTAL - selectedPrivLocal.length, 0);
+  // ========================================
+  // FASE 3: ALOCAÇÃO NAS COTAS REGIONAIS (CENTRO)
+  // ========================================
+  // Candidatos do Centro tentam a cota regional da sua rede
 
-  const privBroadEligible = sorted.filter(s => 
-    !selectedIds.has(s.id) && 
-    s.schoolNetwork === Network.PRIVATE
-  );
+  for (const student of sorted) {
+    if (selectedIds.has(student.id)) continue;
 
-  for (const s of privBroadEligible) {
-    if (selectedPrivBroad.length < privateBroadCapacity) {
-      addToSelected(selectedPrivBroad, s, 'PRIVADA - AMPLA');
-    }
-  }
-  // Sobras da rede privada (quando faltam candidatos) migrarão para pública ampla
-  const leftoverPrivTotal = Math.max(PRIVATE_TOTAL - (selectedPrivLocal.length + selectedPrivBroad.length), 0);
-
-  // Fase 3: Rede pública (80%) + eventuais sobras de PCD. Local primeiro, depois ampla.
-  const pubLocalEligible = sorted.filter(s => 
-    !selectedIds.has(s.id) && 
-    s.schoolNetwork === Network.PUBLIC && 
-    s.isLocal
-  );
-
-  for (const s of pubLocalEligible) {
-    if (selectedPubLocal.length < PUBLIC_LOCAL) {
-      addToSelected(selectedPubLocal, s, 'PÚBLICA - REGIÃO');
-    }
-  }
-  const leftoverPubLocal = Math.max(PUBLIC_LOCAL - selectedPubLocal.length, 0);
-  const publicBroadBase = PUBLIC_TOTAL - PUBLIC_LOCAL;
-  const publicBroadCapacity = publicBroadBase + leftoverPubLocal + leftoverPCD + leftoverPrivTotal;
-  
-  const pubBroadEligible = sorted.filter(s => 
-    !selectedIds.has(s.id) && 
-    s.schoolNetwork === Network.PUBLIC
-  );
-
-  for (const s of pubBroadEligible) {
-    if (selectedPubBroad.length < publicBroadCapacity) {
-      let origin = 'PÚBLICA - AMPLA';
-      
-      if (selectedPubBroad.length >= publicBroadBase) {
-        origin = 'PÚBLICA - AMPLA (REMANEJO)';
+    if (student.isLocal) {
+      if (student.schoolNetwork === Network.PUBLIC && vacancies.publicaCentro > 0) {
+        allocate(student, 'PÚBLICA - REGIÃO', selectedPubLocal);
+        vacancies.publicaCentro--;
+      } else if (student.schoolNetwork === Network.PRIVATE && vacancies.privadaCentro > 0) {
+        allocate(student, 'PRIVADA - REGIÃO', selectedPrivLocal);
+        vacancies.privadaCentro--;
       }
-      
-      addToSelected(selectedPubBroad, s, origin);
     }
   }
 
-  // Fase 4: Classificáveis (listas de espera)
+  // ========================================
+  // FASE 4: ALOCAÇÃO NA AMPLA CONCORRÊNCIA
+  // ========================================
+  // Quem não foi alocado nas cotas tenta a ampla da sua rede
+
+  for (const student of sorted) {
+    if (selectedIds.has(student.id)) continue;
+
+    if (student.schoolNetwork === Network.PUBLIC && vacancies.publicaAmpla > 0) {
+      allocate(student, 'PÚBLICA - AMPLA', selectedPubBroad);
+      vacancies.publicaAmpla--;
+    } else if (student.schoolNetwork === Network.PRIVATE && vacancies.privadaAmpla > 0) {
+      allocate(student, 'PRIVADA - AMPLA', selectedPrivBroad);
+      vacancies.privadaAmpla--;
+    }
+  }
+
+  // ========================================
+  // FASE 5: REALOCAÇÃO DE VAGAS NÃO PREENCHIDAS
+  // ========================================
+  // Art. 8º: Vagas de cota não preenchidas são revertidas
+
+  // PCD não preenchida → Pública Ampla
+  vacancies.publicaAmpla += vacancies.pcd;
+  const leftoverPCD = vacancies.pcd;
+  vacancies.pcd = 0;
+
+  // Centro não preenchida → Ampla da mesma rede
+  const leftoverPubCentro = vacancies.publicaCentro;
+  vacancies.publicaAmpla += vacancies.publicaCentro;
+  vacancies.publicaCentro = 0;
+
+  const leftoverPrivCentro = vacancies.privadaCentro;
+  vacancies.privadaAmpla += vacancies.privadaCentro;
+  vacancies.privadaCentro = 0;
+
+  // Privada não preenchida → Pública Ampla
+  const leftoverPrivAmpla = vacancies.privadaAmpla;
+  vacancies.publicaAmpla += vacancies.privadaAmpla;
+  vacancies.privadaAmpla = 0;
+
+  // ========================================
+  // FASE 6: PREENCHER VAGAS REALOCADAS
+  // ========================================
+
+  for (const student of sorted) {
+    if (selectedIds.has(student.id)) continue;
+
+    if (student.schoolNetwork === Network.PUBLIC && vacancies.publicaAmpla > 0) {
+      allocate(student, 'PÚBLICA - AMPLA (REMANEJO)', selectedPubBroad);
+      vacancies.publicaAmpla--;
+    }
+  }
+
+  // ========================================
+  // FASE 7: CLASSIFICÁVEIS (LISTA DE ESPERA)
+  // ========================================
+  // Art. 7º, § 1º: Candidatos aparecem em TODAS as listas para as quais são elegíveis
+
   const waitingPCD: Student[] = [];
   const waitingPublicLocal: Student[] = [];
   const waitingPublicBroad: Student[] = [];
   const waitingPrivateLocal: Student[] = [];
   const waitingPrivateBroad: Student[] = [];
 
-  const unselected = sorted.filter(s => !selectedIds.has(s.id));
+  const unallocated = sorted.filter(s => !selectedIds.has(s.id));
 
-  unselected.forEach(student => {
+  // Contadores de rank por lista
+  let rankPCD = 0;
+  let rankPubLocal = 0;
+  let rankPubBroad = 0;
+  let rankPrivLocal = 0;
+  let rankPrivBroad = 0;
+
+  for (const student of unallocated) {
     student.status = 'WAITING';
-    
-    if (student.isPCD) {
-      student.rank = waitingPCD.length + 1;
-      waitingPCD.push(student);
-    } else if (student.schoolNetwork === Network.PUBLIC) {
+
+    // Adiciona em TODAS as listas para as quais é elegível (concorrência simultânea)
+    if (student.schoolNetwork === Network.PUBLIC) {
+      // Sempre na ampla da rede
+      rankPubBroad++;
+      const copyBroad = { ...student, rank: rankPubBroad };
+      waitingPublicBroad.push(copyBroad);
+
+      // Se mora no Centro, também na regional
       if (student.isLocal) {
-        student.rank = waitingPublicLocal.length + 1;
-        waitingPublicLocal.push(student);
-      } else {
-        student.rank = waitingPublicBroad.length + 1;
-        waitingPublicBroad.push(student);
-      }
-    } else if (student.schoolNetwork === Network.PRIVATE) {
-      if (student.isLocal) {
-        student.rank = waitingPrivateLocal.length + 1;
-        waitingPrivateLocal.push(student);
-      } else {
-        student.rank = waitingPrivateBroad.length + 1;
-        waitingPrivateBroad.push(student);
+        rankPubLocal++;
+        const copyLocal = { ...student, rank: rankPubLocal };
+        waitingPublicLocal.push(copyLocal);
       }
     }
-  });
+
+    if (student.schoolNetwork === Network.PRIVATE) {
+      rankPrivBroad++;
+      const copyBroad = { ...student, rank: rankPrivBroad };
+      waitingPrivateBroad.push(copyBroad);
+
+      if (student.isLocal) {
+        rankPrivLocal++;
+        const copyLocal = { ...student, rank: rankPrivLocal };
+        waitingPrivateLocal.push(copyLocal);
+      }
+    }
+
+    // PCD entra na lista PCD independente da rede
+    if (student.isPCD) {
+      rankPCD++;
+      const copyPCD = { ...student, rank: rankPCD };
+      waitingPCD.push(copyPCD);
+    }
+  }
+
+  // ========================================
+  // RETORNO
+  // ========================================
 
   return {
     course,
@@ -345,7 +424,6 @@ const processCourse = (course: Course, candidates: Student[]): CourseResult => {
     publicBroad: selectedPubBroad,
     privateLocal: selectedPrivLocal,
     privateBroad: selectedPrivBroad,
-    
     waitingPCD,
     waitingPublicLocal,
     waitingPublicBroad,
@@ -353,3 +431,4 @@ const processCourse = (course: Course, candidates: Student[]): CourseResult => {
     waitingPrivateBroad
   };
 };
+

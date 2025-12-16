@@ -152,6 +152,28 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
       };
     });
 
+    // Estatísticas de concorrência simultânea
+    // Com a nova regra: cotistas tentam cota primeiro, depois ampla
+    // Cotistas na ampla = não couberam na cota, foram para ampla
+    const cotistasNaAmplaList = selectedStudents.filter((s) => {
+      if (!s.eligibilities || !s.allocatedIn) return false;
+      const isInAmpla = s.allocatedIn.includes('AMPLA');
+      const hadQuotaOption = s.eligibilities.includes('PCD') ||
+        s.eligibilities.includes('PUBLICA_CENTRO') ||
+        s.eligibilities.includes('PRIVADA_CENTRO');
+      return isInAmpla && hadQuotaOption;
+    });
+
+    // PCD que foram para ampla (não couberam na cota PCD)
+    const pcdNaAmplaList = selectedStudents.filter((s) =>
+      s.eligibilities?.includes('PCD') && s.allocatedIn?.includes('AMPLA')
+    );
+    // Centro que foram para ampla (não couberam na cota Centro)
+    const centroNaAmplaList = selectedStudents.filter((s) =>
+      (s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO')) &&
+      s.allocatedIn?.includes('AMPLA')
+    );
+
     return {
       total,
       selected: selectedStudents.length,
@@ -182,6 +204,10 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
       histogram,
       maxBin,
       courseRows,
+      // Novas métricas de concorrência simultânea
+      cotistasNaAmplaList,
+      pcdNaAmplaList,
+      centroNaAmplaList,
     };
   }, [data]);
 
@@ -342,6 +368,99 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Concorrência Simultânea - Art. 7º Lei 15.142/2025 */}
+          <div className="mt-6 pt-4 border-t">
+            <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <span className="px-2 py-0.5 text-[10px] bg-blue-100 text-blue-700 rounded-full font-medium">NOVO</span>
+              Concorrência Simultânea
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Cotistas que não couberam nas vagas reservadas e foram para a Ampla Concorrência.
+            </p>
+            <div className="grid grid-cols-3 gap-3 mt-3 text-sm text-gray-600">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded p-3 border border-blue-200">
+                <div className="text-xs text-blue-600">Cotistas na Ampla</div>
+                <div className="font-bold text-blue-700 text-lg">
+                  {computed.cotistasNaAmplaList.length}
+                </div>
+                <div className="text-[10px] text-blue-500 mt-1">
+                  Não couberam na cota
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-teal-50 to-teal-100 rounded p-3 border border-teal-200">
+                <div className="text-xs text-teal-600">PCD → Ampla</div>
+                <div className="font-bold text-teal-700 text-lg">
+                  {computed.pcdNaAmplaList.length}
+                </div>
+                <div className="text-[10px] text-teal-500 mt-1">
+                  Cota PCD esgotada
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-green-50 to-green-100 rounded p-3 border border-green-200">
+                <div className="text-xs text-green-600">Centro → Ampla</div>
+                <div className="font-bold text-green-700 text-lg">
+                  {computed.centroNaAmplaList.length}
+                </div>
+                <div className="text-[10px] text-green-500 mt-1">
+                  Cota Centro esgotada
+                </div>
+              </div>
+            </div>
+
+            {/* Lista detalhada de candidatos afetados */}
+            {computed.cotistasNaAmplaList.length > 0 && (
+              <div className="mt-4 bg-white rounded border overflow-hidden">
+                <div className="px-3 py-2 bg-blue-50 border-b text-xs font-semibold text-blue-800">
+                  📋 Candidatos Cotistas que Entraram pela Ampla
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">Curso</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">Nome</th>
+                        <th className="px-3 py-2 text-center font-medium text-gray-600">Nota</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">Alocado em</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">Elegível para</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {computed.cotistasNaAmplaList.map((s, idx) => {
+                        const quotas = [];
+                        if (s.eligibilities?.includes('PCD')) quotas.push('PCD');
+                        if (s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO')) quotas.push('Centro');
+                        return (
+                          <tr key={`${s.id}-${idx}`} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-gray-600 truncate max-w-[100px]" title={s.course}>{s.course}</td>
+                            <td className="px-3 py-2 font-medium text-gray-900">{s.name}</td>
+                            <td className="px-3 py-2 text-center font-bold text-gray-900">{formatScore(s.finalScore)}</td>
+                            <td className="px-3 py-2">
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">
+                                {s.allocatedIn}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {quotas.map(q => (
+                                <span key={q} className={`px-2 py-0.5 rounded text-[10px] font-medium mr-1 ${q === 'PCD' ? 'bg-teal-100 text-teal-700' : 'bg-green-100 text-green-700'
+                                  }`}>
+                                  {q}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-3 py-2 bg-gray-50 border-t text-[10px] text-gray-500">
+                  Estes candidatos tinham elegibilidade para cotas (PCD ou Centro), mas não couberam nas vagas reservadas.
+                  Foram classificados na Ampla Concorrência. Nos CLASSIFICÁVEIS, eles aparecem em ambas as listas (cota + ampla).
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

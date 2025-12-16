@@ -30,6 +30,14 @@ export interface RawStudentRow {
   [key: string]: string; // For dynamic grade columns
 }
 
+// Tipos de elegibilidade para concorrência simultânea
+export type EligibilityType =
+  | 'PCD'
+  | 'PUBLICA_CENTRO'
+  | 'PUBLICA_AMPLA'
+  | 'PRIVADA_CENTRO'
+  | 'PRIVADA_AMPLA';
+
 export interface Student {
   id: string;
   registrationNumber: string; // Número de inscrição oficial da planilha
@@ -43,24 +51,29 @@ export interface Student {
   claimedQuota: string;
   isPCD: boolean;
   isLocal: boolean; // Lives in CENTRO
-  
+
   // Averages
   avg6th: number;
   avg7th: number;
   avg8th: number;
   avg9th: number;
-  
+
   // Tie Breakers
   avgPort: number;
   avgMat: number;
-  
+
   finalScore: number;
-  
+
   // Processing Status
   status?: 'SELECTED' | 'WAITING' | 'DISQUALIFIED';
   selectedCategory?: string; // 'PCD', 'PUB_LOCAL', 'PUB_AMPLA', etc.
   rank: number; // Relative rank within the specific list
-  
+
+  // Concorrência simultânea (Art. 7º Lei 15.142/2025)
+  eligibilities?: EligibilityType[]; // Todas as categorias elegíveis
+  allocatedIn?: string; // Onde foi efetivamente alocado
+  benefitedFromSimultaneous?: boolean; // Ocupou vaga liberada por cotista na ampla
+
   // Validation
   warnings: string[];
 }
@@ -73,7 +86,7 @@ export interface CourseResult {
   publicBroad: Student[];
   privateLocal: Student[];
   privateBroad: Student[];
-  
+
   // Waiting Lists (Classificáveis)
   waitingPCD: Student[];
   waitingPublicLocal: Student[];

@@ -8,16 +8,16 @@ interface StudentListProps {
   color: string;
 }
 
-export const StudentList: React.FC<StudentListProps> = ({ 
-  students, 
-  title, 
+export const StudentList: React.FC<StudentListProps> = ({
+  students,
+  title,
   color
 }) => {
   const formatScore = (value: number) =>
     value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Always render the container to show the empty state message if needed
-  
+
   return (
     <div className={`mb-8 border rounded-lg overflow-hidden bg-white shadow-sm ${color}`}>
       <div className={`px-4 py-3 border-b font-bold text-gray-800 flex justify-between items-center bg-gray-50`}>
@@ -56,27 +56,38 @@ export const StudentList: React.FC<StudentListProps> = ({
                     {s.registrationNumber}
                   </td>
                   <td className="px-4 py-3 font-medium text-gray-900">
-                     <div className="flex items-center">
-                       {s.name}
-                       {s.warnings && s.warnings.length > 0 && (
-                         <div className="group relative ml-2">
-                           <AlertTriangle className="w-4 h-4 text-amber-500 cursor-help" />
-                           <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 bg-gray-800 text-white text-xs rounded p-2 z-10 shadow-lg">
-                             <p className="font-bold mb-1">Avisos de processamento:</p>
-                             <ul className="list-disc pl-3">
-                               {s.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                             </ul>
-                           </div>
-                         </div>
-                       )}
-                     </div>
+                    <div className="flex items-center flex-wrap gap-1">
+                      {s.name}
+                      {/* Badges de elegibilidade - mostra cotas para as quais era elegível mas não usou */}
+                      {s.eligibilities && s.eligibilities.length > 1 && s.allocatedIn && (
+                        <>
+                          {s.eligibilities.includes('PCD') && !s.allocatedIn.includes('PCD') && (
+                            <span className="px-1.5 py-0.5 text-[9px] bg-teal-100 text-teal-700 rounded font-medium">PCD</span>
+                          )}
+                          {(s.eligibilities.includes('PUBLICA_CENTRO') || s.eligibilities.includes('PRIVADA_CENTRO'))
+                            && !s.allocatedIn.includes('REGIÃO') && (
+                              <span className="px-1.5 py-0.5 text-[9px] bg-green-100 text-green-700 rounded font-medium">Centro</span>
+                            )}
+                        </>
+                      )}
+                      {s.warnings && s.warnings.length > 0 && (
+                        <div className="group relative ml-1">
+                          <AlertTriangle className="w-4 h-4 text-amber-500 cursor-help" />
+                          <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 bg-gray-800 text-white text-xs rounded p-2 z-10 shadow-lg">
+                            <p className="font-bold mb-1">Avisos de processamento:</p>
+                            <ul className="list-disc pl-3">
+                              {s.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-center">
-                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
-                       s.status === 'SELECTED' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
-                     }`}>
-                       {s.status === 'SELECTED' ? 'CLASSIFICADO' : 'CLASSIFICÁVEL'}
-                     </span>
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${s.status === 'SELECTED' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+                      }`}>
+                      {s.status === 'SELECTED' ? 'CLASSIFICADO' : 'CLASSIFICÁVEL'}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-gray-900 bg-yellow-50">
                     {formatScore(s.finalScore)}

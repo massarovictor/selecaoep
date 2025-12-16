@@ -32,7 +32,7 @@ const getGroupsForCourse = (result: CourseResult): StudentGroup[] => [
   { title: "CLASSIFICADOS - Ampla Concorrência - Pública", students: result.publicBroad },
   { title: "CLASSIFICADOS - Cota Regional (Centro) - Privada", students: result.privateLocal },
   { title: "CLASSIFICADOS - Ampla Concorrência - Privada", students: result.privateBroad },
-  
+
   // Waiting
   { title: "CLASSIFICÁVEIS - Cota PCD", students: result.waitingPCD, isWaiting: true },
   { title: "CLASSIFICÁVEIS - Cota Regional (Centro) - Pública", students: result.waitingPublicLocal, isWaiting: true },
@@ -43,7 +43,7 @@ const getGroupsForCourse = (result: CourseResult): StudentGroup[] => [
 
 export const generatePDF = (data: ProcessingSummary) => {
   const doc = new jsPDF();
-  
+
   // Title
   doc.setFontSize(16);
   doc.text("RESULTADO PRELIMINAR - SELEÇÃO EEEP 2026", 14, 15);
@@ -75,13 +75,13 @@ export const generatePDF = (data: ProcessingSummary) => {
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(10);
       doc.setFont("helvetica", "bold");
-      
+
       // Check space
       if (currentY > 270) {
         doc.addPage();
         currentY = 20;
       }
-      
+
       doc.text(`${courseResult.course} - ${group.title}`, 14, currentY);
       currentY += 2;
 
@@ -93,13 +93,29 @@ export const generatePDF = (data: ProcessingSummary) => {
         currentY += 10;
         doc.setFont("helvetica", "normal"); // Reset
       } else {
-        const tableData = group.students.map((s) => [
-          s.rank, 
-          s.registrationNumber,
-          s.name,
-          formatScore(s.finalScore),
-          getStatusLabel(s.status)
-        ]);
+        const tableData = group.students.map((s) => {
+          // Adicionar indicadores de elegibilidade para candidatos cotistas na ampla
+          const badges: string[] = [];
+          if (s.eligibilities?.includes('PCD') && s.allocatedIn && !s.allocatedIn.includes('PCD')) {
+            badges.push('PCD');
+          }
+          if ((s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO'))
+            && s.allocatedIn && !s.allocatedIn.includes('REGIÃO')) {
+            badges.push('Centro');
+          }
+
+          const name = badges.length > 0
+            ? `${s.name} [${badges.join(', ')}]`
+            : s.name;
+
+          return [
+            s.rank,
+            s.registrationNumber,
+            name,
+            formatScore(s.finalScore),
+            getStatusLabel(s.status)
+          ];
+        });
 
         autoTable(doc, {
           startY: currentY,
@@ -121,12 +137,26 @@ export const generatePDF = (data: ProcessingSummary) => {
             currentY = data.cursor.y + 10;
           }
         });
-        
+
         // Update Y after table
-        currentY = (doc as any).lastAutoTable.finalY + 10;
+        currentY = (doc as any).lastAutoTable.finalY + 5;
+
+        // Adicionar nota de rodapé sempre após listas de cota (PCD ou Centro)
+        const isQuotaList = group.title.includes('Cota PCD') || group.title.includes('Cota Regional');
+        if (isQuotaList && group.students.length > 0) {
+          doc.setFontSize(7);
+          doc.setTextColor(100, 100, 100);
+          doc.setFont("helvetica", "italic");
+          doc.text("Candidatos cotistas concorrem primeiro nas vagas reservadas. Classificáveis aparecem também na lista de Ampla Concorrência.", 14, currentY);
+          currentY += 8;
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(0, 0, 0);
+        }
+
+        currentY += 5;
       }
     });
-    
+
     currentY += 5; // Extra gap between courses
   });
 
@@ -143,34 +173,58 @@ export const generateXLS = (data: ProcessingSummary) => {
     groups.forEach(group => {
       // Add a header row for the category
       rows.push({}); // spacer
-      rows.push({ "Nome Completo": `>>> ${group.title.toUpperCase()}` }); 
+      rows.push({ "Nome Completo": `>>> ${group.title.toUpperCase()}` });
 
       if (group.students.length === 0) {
-         rows.push({
-           "Curso": courseResult.course,
-           "Lista": group.title,
-           "Nome Completo": "Não há candidatos inscritos nesta modalidade."
-         });
+        rows.push({
+          "Curso": courseResult.course,
+          "Lista": group.title,
+          "Nome Completo": "Não há candidatos inscritos nesta modalidade."
+        });
       } else {
         // Add students
         group.students.forEach((s) => {
+          // Indicadores de elegibilidade
+          const badges: string[] = [];
+          if (s.eligibilities?.includes('PCD') && s.allocatedIn && !s.allocatedIn.includes('PCD')) {
+            badges.push('PCD');
+          }
+          if ((s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO'))
+            && s.allocatedIn && !s.allocatedIn.includes('REGIÃO')) {
+            badges.push('Centro');
+          }
+
+          const name = badges.length > 0
+            ? `${s.name} [${badges.join(', ')}]`
+            : s.name;
+
           rows.push({
             "Curso": courseResult.course,
             "Lista": group.title,
             "Posição": s.rank,
             "Inscrição": s.registrationNumber,
-            "Nome Completo": s.name,
+            "Nome Completo": name,
             "Data Nasc.": formatDate(s.birthDate),
             "Nota Final": formatScore(s.finalScore),
             "Situação": getStatusLabel(s.status),
+            "Cotas Elegíveis": s.eligibilities?.join(', ') || '',
             "Observações": s.warnings.join("; ")
           });
         });
+
+        // Adicionar nota sempre após listas de cota (PCD ou Centro)
+        const isQuotaList = group.title.includes('Cota PCD') || group.title.includes('Cota Regional');
+        if (isQuotaList) {
+          rows.push({});
+          rows.push({
+            "Nome Completo": "Candidatos cotistas concorrem primeiro nas vagas reservadas. Classificáveis aparecem também na lista de Ampla Concorrência."
+          });
+        }
       }
     });
 
     const ws = XLSX.utils.json_to_sheet(rows);
-    
+
     // Set column widths
     const wscols = [
       { wch: 25 }, // Curso
@@ -181,6 +235,7 @@ export const generateXLS = (data: ProcessingSummary) => {
       { wch: 12 }, // Data
       { wch: 10 }, // Nota
       { wch: 15 }, // Situação
+      { wch: 35 }, // Cotas Elegíveis
       { wch: 40 }, // Obs
     ];
     ws['!cols'] = wscols;
@@ -224,7 +279,7 @@ export const generateDOC = (data: ProcessingSummary) => {
 
     groups.forEach(g => {
       html += `<div class='group-header'>${res.course} - ${g.title}</div>`;
-      
+
       html += `
         <table>
           <thead>
@@ -243,16 +298,36 @@ export const generateDOC = (data: ProcessingSummary) => {
         html += `<tr><td colspan="5" class="empty-msg">Não há candidatos inscritos nesta modalidade.</td></tr>`;
       } else {
         g.students.forEach((s) => {
+          // Indicadores de elegibilidade
+          const badges: string[] = [];
+          if (s.eligibilities?.includes('PCD') && s.allocatedIn && !s.allocatedIn.includes('PCD')) {
+            badges.push('PCD');
+          }
+          if ((s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO'))
+            && s.allocatedIn && !s.allocatedIn.includes('REGIÃO')) {
+            badges.push('Centro');
+          }
+
+          const nameHtml = badges.length > 0
+            ? `${s.name} <span style="font-size: 8pt; color: #666;">[${badges.join(', ')}]</span>`
+            : s.name;
+
           html += `
             <tr>
               <td class="center">${s.rank}</td>
               <td class="center">${s.registrationNumber}</td>
-              <td>${s.name}</td>
+              <td>${nameHtml}</td>
               <td class="right"><b>${formatScore(s.finalScore)}</b></td>
               <td class="center">${getStatusLabel(s.status)}</td>
             </tr>
           `;
         });
+
+        // Adicionar nota de rodapé sempre após listas de cota (PCD ou Centro)
+        const isQuotaList = g.title.includes('Cota PCD') || g.title.includes('Cota Regional');
+        if (isQuotaList && g.students.length > 0) {
+          html += `<tr><td colspan="5" style="font-size: 8pt; font-style: italic; color: #666; padding-top: 10px;">Candidatos cotistas concorrem primeiro nas vagas reservadas. Classificáveis aparecem também na lista de Ampla Concorrência.</td></tr>`;
+        }
       }
 
       html += `</tbody></table>`;

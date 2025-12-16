@@ -85,11 +85,11 @@ export const processCSV = (csvText: string): ProcessingSummary => {
     skipEmptyLines: true,
   });
 
-  // Filtra linhas vazias ou sem dados essenciais (nome/inscrição)
+  // Filtra linhas vazias ou sem dados essenciais (nome E inscrição obrigatórios)
   const validRows = result.data.filter((row) => {
     const nameRaw = getValue(row, ["NOME COMPLETO"]);
     const regRaw = getValue(row, ["NÚMERO DE INSCRIÇÃO", "NUMERO DE INSCRICAO"]);
-    return Boolean((nameRaw && nameRaw.trim()) || (regRaw && regRaw.trim()));
+    return Boolean((nameRaw && nameRaw.trim()) && (regRaw && regRaw.trim()));
   });
 
   const students: Student[] = validRows.map((row, index) => {

@@ -66,12 +66,22 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
     const selectedStudents = flattened.flatMap((r) => r.selected);
     const waitingStudents = flattened.flatMap((r) => r.waiting);
 
-    const total = allStudents.length;
+    // Deduplicar estudantes por ID (necessário porque a concorrência simultânea 
+    // coloca o mesmo candidato em múltiplas listas de espera)
+    const uniqueStudentsMap = new Map<string, typeof allStudents[0]>();
+    allStudents.forEach((s) => {
+      if (!uniqueStudentsMap.has(s.id)) {
+        uniqueStudentsMap.set(s.id, s);
+      }
+    });
+    const uniqueStudents = [...uniqueStudentsMap.values()];
 
-    const publicCount = allStudents.filter((s) => s.schoolNetwork === Network.PUBLIC).length;
-    const privateCount = allStudents.filter((s) => s.schoolNetwork === Network.PRIVATE).length;
-    const pcdCount = allStudents.filter((s) => s.isPCD).length;
-    const localCount = allStudents.filter((s) => s.isLocal).length;
+    const total = uniqueStudents.length;
+
+    const publicCount = uniqueStudents.filter((s) => s.schoolNetwork === Network.PUBLIC).length;
+    const privateCount = uniqueStudents.filter((s) => s.schoolNetwork === Network.PRIVATE).length;
+    const pcdCount = uniqueStudents.filter((s) => s.isPCD).length;
+    const localCount = uniqueStudents.filter((s) => s.isLocal).length;
 
     const selectedPublic = selectedStudents.filter((s) => s.schoolNetwork === Network.PUBLIC).length;
     const selectedPrivate = selectedStudents.filter((s) => s.schoolNetwork === Network.PRIVATE).length;
@@ -91,14 +101,23 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
     ).length;
 
     const registrationCounts = new Map<string, number>();
-    allStudents.forEach((s) => {
+    const registrationStudents = new Map<string, { name: string; course: string }[]>();
+    uniqueStudents.forEach((s) => {
       const key = (s.registrationNumber ?? '').trim();
       if (!key) return;
       registrationCounts.set(key, (registrationCounts.get(key) ?? 0) + 1);
+      const existing = registrationStudents.get(key) ?? [];
+      existing.push({ name: s.name, course: s.course });
+      registrationStudents.set(key, existing);
     });
     const duplicatedRegistrationNumbers = [...registrationCounts.entries()].filter(([, c]) => c > 1);
     const duplicatedRegistrationKeys = duplicatedRegistrationNumbers.length;
     const duplicatedRegistrationRows = duplicatedRegistrationNumbers.reduce((acc, [, c]) => acc + c, 0);
+    const duplicatedRegistrationDetails = duplicatedRegistrationNumbers.map(([regNum, count]) => ({
+      registrationNumber: regNum,
+      count,
+      students: registrationStudents.get(regNum) ?? []
+    }));
 
     const scores = allStudents
       .map((s) => s.finalScore)
@@ -174,6 +193,32 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
       s.allocatedIn?.includes('AMPLA')
     );
 
+    // CLASSIFICÁVEIS: Candidatos que aparecem em múltiplas listas de espera
+    // Deduplicar por ID para contar candidatos únicos
+    const waitingUniqueMap = new Map<string, typeof waitingStudents[0]>();
+    waitingStudents.forEach((s) => {
+      if (!waitingUniqueMap.has(s.id)) {
+        waitingUniqueMap.set(s.id, s);
+      }
+    });
+    const waitingUnique = [...waitingUniqueMap.values()];
+
+    // Classificáveis PCD (aparecem na lista PCD e também na ampla)
+    const classificaveisPCDList = waitingUnique.filter((s) => s.isPCD);
+
+    // Classificáveis Centro (aparecem na lista Centro e também na ampla)
+    const classificaveisCentroList = waitingUnique.filter((s) => s.isLocal);
+
+    // Classificáveis com múltiplas elegibilidades (PCD + Centro, etc)
+    const classificaveisMultiplosList = waitingUnique.filter((s) => {
+      let count = 0;
+      if (s.isPCD) count++;
+      if (s.isLocal) count++;
+      // Sempre conta 1 para ampla
+      count++;
+      return count >= 3; // PCD + Centro + Ampla
+    });
+
     return {
       total,
       selected: selectedStudents.length,
@@ -193,6 +238,7 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
       ignoredGrades,
       duplicatedRegistrationKeys,
       duplicatedRegistrationRows,
+      duplicatedRegistrationDetails,
       scores: {
         mean,
         median,
@@ -208,6 +254,10 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
       cotistasNaAmplaList,
       pcdNaAmplaList,
       centroNaAmplaList,
+      // Classificáveis em múltiplas listas
+      classificaveisPCDList,
+      classificaveisCentroList,
+      classificaveisMultiplosList,
     };
   }, [data]);
 
@@ -236,7 +286,7 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
             <div className="text-sm text-gray-500">Inscritos</div>
             <Users className="w-5 h-5 text-gray-400" />
           </div>
-          <div className="text-3xl font-bold text-gray-900 mt-2">{computed.total}</div>
+          <div className="text-3xl font-bold text-gray-900 mt-2">{data.totalProcessed}</div>
           <div className="text-xs text-gray-500 mt-1">candidatos processados</div>
         </div>
         <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
@@ -371,97 +421,131 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
           </div>
 
           {/* Concorrência Simultânea - Art. 7º Lei 15.142/2025 */}
-          <div className="mt-6 pt-4 border-t">
-            <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <span className="px-2 py-0.5 text-[10px] bg-blue-100 text-blue-700 rounded-full font-medium">NOVO</span>
-              Concorrência Simultânea
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Cotistas que não couberam nas vagas reservadas e foram para a Ampla Concorrência.
-            </p>
-            <div className="grid grid-cols-3 gap-3 mt-3 text-sm text-gray-600">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded p-3 border border-blue-200">
-                <div className="text-xs text-blue-600">Cotistas na Ampla</div>
-                <div className="font-bold text-blue-700 text-lg">
-                  {computed.cotistasNaAmplaList.length}
-                </div>
-                <div className="text-[10px] text-blue-500 mt-1">
-                  Não couberam na cota
-                </div>
+          {(computed.cotistasNaAmplaList.length > 0 || computed.classificaveisPCDList.length > 0 || computed.classificaveisCentroList.length > 0) && (
+            <div className="mt-6 pt-4 border-t">
+              <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <span className="px-2 py-0.5 text-[10px] bg-blue-100 text-blue-700 rounded-full font-medium">Art. 7º</span>
+                Concorrência Simultânea
               </div>
-              <div className="bg-gradient-to-br from-teal-50 to-teal-100 rounded p-3 border border-teal-200">
-                <div className="text-xs text-teal-600">PCD → Ampla</div>
-                <div className="font-bold text-teal-700 text-lg">
-                  {computed.pcdNaAmplaList.length}
-                </div>
-                <div className="text-[10px] text-teal-500 mt-1">
-                  Cota PCD esgotada
-                </div>
-              </div>
-              <div className="bg-gradient-to-br from-green-50 to-green-100 rounded p-3 border border-green-200">
-                <div className="text-xs text-green-600">Centro → Ampla</div>
-                <div className="font-bold text-green-700 text-lg">
-                  {computed.centroNaAmplaList.length}
-                </div>
-                <div className="text-[10px] text-green-500 mt-1">
-                  Cota Centro esgotada
-                </div>
-              </div>
-            </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Candidatos cotistas que concorrem em múltiplas listas (Lei 15.142/2025).
+              </p>
 
-            {/* Lista detalhada de candidatos afetados */}
-            {computed.cotistasNaAmplaList.length > 0 && (
-              <div className="mt-4 bg-white rounded border overflow-hidden">
-                <div className="px-3 py-2 bg-blue-50 border-b text-xs font-semibold text-blue-800">
-                  📋 Candidatos Cotistas que Entraram pela Ampla
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-medium text-gray-600">Curso</th>
-                        <th className="px-3 py-2 text-left font-medium text-gray-600">Nome</th>
-                        <th className="px-3 py-2 text-center font-medium text-gray-600">Nota</th>
-                        <th className="px-3 py-2 text-left font-medium text-gray-600">Alocado em</th>
-                        <th className="px-3 py-2 text-left font-medium text-gray-600">Elegível para</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {computed.cotistasNaAmplaList.map((s, idx) => {
-                        const quotas = [];
-                        if (s.eligibilities?.includes('PCD')) quotas.push('PCD');
-                        if (s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO')) quotas.push('Centro');
-                        return (
-                          <tr key={`${s.id}-${idx}`} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 text-gray-600 truncate max-w-[100px]" title={s.course}>{s.course}</td>
-                            <td className="px-3 py-2 font-medium text-gray-900">{s.name}</td>
-                            <td className="px-3 py-2 text-center font-bold text-gray-900">{formatScore(s.finalScore)}</td>
-                            <td className="px-3 py-2">
-                              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">
-                                {s.allocatedIn}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2">
-                              {quotas.map(q => (
-                                <span key={q} className={`px-2 py-0.5 rounded text-[10px] font-medium mr-1 ${q === 'PCD' ? 'bg-teal-100 text-teal-700' : 'bg-green-100 text-green-700'
-                                  }`}>
-                                  {q}
-                                </span>
-                              ))}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="px-3 py-2 bg-gray-50 border-t text-[10px] text-gray-500">
-                  Estes candidatos tinham elegibilidade para cotas (PCD ou Centro), mas não couberam nas vagas reservadas.
-                  Foram classificados na Ampla Concorrência. Nos CLASSIFICÁVEIS, eles aparecem em ambas as listas (cota + ampla).
-                </div>
+              <div className="space-y-4 mt-4">
+
+                {/* CLASSIFICADOS - Só mostra se houver */}
+                {computed.cotistasNaAmplaList.length > 0 && (
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg border border-green-200 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="px-2 py-0.5 text-[10px] bg-green-600 text-white rounded-full font-medium">CLASSIFICADOS</span>
+                      <span className="text-xs text-green-700">Cotistas que entraram pela Ampla</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                      <div className="bg-white/60 rounded p-2">
+                        <div className="text-lg font-bold text-blue-700">{computed.cotistasNaAmplaList.length}</div>
+                        <div className="text-[10px] text-gray-600">Total</div>
+                      </div>
+                      <div className="bg-white/60 rounded p-2">
+                        <div className="text-lg font-bold text-teal-700">{computed.pcdNaAmplaList.length}</div>
+                        <div className="text-[10px] text-gray-600">PCD → Ampla</div>
+                      </div>
+                      <div className="bg-white/60 rounded p-2">
+                        <div className="text-lg font-bold text-green-700">{computed.centroNaAmplaList.length}</div>
+                        <div className="text-[10px] text-gray-600">Centro → Ampla</div>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded border overflow-hidden">
+                      <div className="max-h-48 overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 sticky top-0">
+                            <tr>
+                              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Nome</th>
+                              <th className="px-2 py-1.5 text-center font-medium text-gray-600">Nota</th>
+                              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Origem</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {computed.cotistasNaAmplaList.map((s, idx) => {
+                              const quotas = [];
+                              if (s.eligibilities?.includes('PCD')) quotas.push('PCD');
+                              if (s.eligibilities?.includes('PUBLICA_CENTRO') || s.eligibilities?.includes('PRIVADA_CENTRO')) quotas.push('Centro');
+                              return (
+                                <tr key={`class-${s.id}-${idx}`} className="hover:bg-gray-50">
+                                  <td className="px-2 py-1.5 font-medium text-gray-900 truncate max-w-[150px]" title={s.name}>{s.name}</td>
+                                  <td className="px-2 py-1.5 text-center font-bold text-gray-900">{formatScore(s.finalScore)}</td>
+                                  <td className="px-2 py-1.5">
+                                    {quotas.map(q => (
+                                      <span key={q} className={`px-1.5 py-0.5 rounded text-[9px] font-medium mr-1 ${q === 'PCD' ? 'bg-teal-100 text-teal-700' : 'bg-green-100 text-green-700'}`}>{q}</span>
+                                    ))}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* CLASSIFICÁVEIS - Só mostra se houver */}
+                {(computed.classificaveisPCDList.length > 0 || computed.classificaveisCentroList.length > 0) && (
+                  <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg border border-orange-200 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="px-2 py-0.5 text-[10px] bg-orange-600 text-white rounded-full font-medium">CLASSIFICÁVEIS</span>
+                      <span className="text-xs text-orange-700">Cotistas em múltiplas listas de espera</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                      <div className="bg-white/60 rounded p-2">
+                        <div className="text-lg font-bold text-teal-700">{computed.classificaveisPCDList.length}</div>
+                        <div className="text-[10px] text-gray-600">PCD</div>
+                      </div>
+                      <div className="bg-white/60 rounded p-2">
+                        <div className="text-lg font-bold text-green-700">{computed.classificaveisCentroList.length}</div>
+                        <div className="text-[10px] text-gray-600">Centro</div>
+                      </div>
+                      <div className="bg-white/60 rounded p-2">
+                        <div className="text-lg font-bold text-purple-700">{computed.classificaveisMultiplosList.length}</div>
+                        <div className="text-[10px] text-gray-600">PCD + Centro</div>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded border overflow-hidden">
+                      <div className="max-h-48 overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 sticky top-0">
+                            <tr>
+                              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Nome</th>
+                              <th className="px-2 py-1.5 text-center font-medium text-gray-600">Nota</th>
+                              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Listas</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {/* Unir e deduplicar PCD e Centro */}
+                            {[...new Map([...computed.classificaveisPCDList, ...computed.classificaveisCentroList].map(s => [s.id, s])).values()].map((s, idx) => (
+                              <tr key={`espera-${s.id}-${idx}`} className="hover:bg-gray-50">
+                                <td className="px-2 py-1.5 font-medium text-gray-900 truncate max-w-[150px]" title={s.name}>{s.name}</td>
+                                <td className="px-2 py-1.5 text-center font-bold text-gray-900">{formatScore(s.finalScore)}</td>
+                                <td className="px-2 py-1.5">
+                                  {s.isPCD && <span className="px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded text-[9px] font-medium mr-1">PCD</span>}
+                                  {s.isLocal && <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[9px] font-medium mr-1">Centro</span>}
+                                  <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[9px] font-medium">Ampla</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+
+              <div className="mt-3 text-[10px] text-gray-500 bg-gray-50 rounded p-2">
+                <strong>Nota:</strong> Candidatos cotistas que não couberam nas vagas reservadas foram para a Ampla Concorrência (Classificados).
+                Os Classificáveis aparecem simultaneamente nas listas de espera de todas as cotas para as quais são elegíveis.
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Scores */}
@@ -626,6 +710,51 @@ export const GeneralStats: React.FC<GeneralStatsProps> = ({ data }) => {
             </div>
           </div>
         </div>
+
+        {/* Lista detalhada de duplicados */}
+        {computed.duplicatedRegistrationDetails.length > 0 && (
+          <div className="mt-4 bg-red-50 rounded-lg border border-red-200 overflow-hidden">
+            <div className="px-4 py-3 bg-red-100 border-b border-red-200">
+              <div className="text-sm font-semibold text-red-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Candidatos com Inscrições Duplicadas
+              </div>
+              <p className="text-xs text-red-600 mt-1">
+                Verifique esses registros no arquivo original. Podem ser erros de digitação ou inscrições duplicadas.
+              </p>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-red-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-medium text-red-700">Nº Inscrição</th>
+                    <th className="px-4 py-2 text-left font-medium text-red-700">Nome</th>
+                    <th className="px-4 py-2 text-left font-medium text-red-700">Curso</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-red-100">
+                  {computed.duplicatedRegistrationDetails.flatMap((dup) =>
+                    dup.students.map((student, idx) => (
+                      <tr key={`${dup.registrationNumber}-${idx}`} className="hover:bg-red-100">
+                        <td className="px-4 py-2 font-mono text-red-900">
+                          {dup.registrationNumber}
+                          {idx === 0 && (
+                            <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-red-200 text-red-800 rounded">
+                              {dup.count}x
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 font-medium text-gray-900">{student.name}</td>
+                        <td className="px-4 py-2 text-gray-600">{student.course}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <p className="text-xs text-gray-500 mt-4">
           * Duplicidade considera somente “Inscrição” repetida no arquivo.
         </p>

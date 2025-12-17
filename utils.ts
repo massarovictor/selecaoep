@@ -1,22 +1,26 @@
 ﻿import { RawStudentRow, Student, Course, Network, CourseResult, ProcessingSummary } from './types';
 import Papa from 'papaparse';
 
-type GradeResult = { value: number; warning?: string };
+type GradeResult = { value: number; warning?: string; isBlank?: boolean };
 
 // Parsing Helper with Validation
+// Notas em branco retornam value: 0 com isBlank: true para serem ignoradas no cálculo
 const parseGrade = (val: string): GradeResult => {
-  if (!val) return { value: 0 };
+  if (!val || val.trim() === '') return { value: 0, isBlank: true };
 
   const clean = val.replace(/"/g, '').replace(',', '.').trim();
+
+  if (clean === '') return { value: 0, isBlank: true };
+
   let num = parseFloat(clean);
 
-  if (isNaN(num)) return { value: 0 };
+  if (isNaN(num)) return { value: 0, isBlank: true };
 
   if (num > 10) {
     if (num <= 100) {
       return { value: num / 10, warning: `Nota ${num} ajustada para ${num / 10}` };
     }
-    return { value: 0, warning: `Nota ${num} ignorada (>100)` };
+    return { value: 0, warning: `Nota ${num} ignorada (>100)`, isBlank: true };
   }
 
   return { value: num };
@@ -117,10 +121,11 @@ export const processCSV = (csvText: string): ProcessingSummary => {
     const quotaNormalized = normalizeText(quotaRaw);
     const isPCD = quotaNormalized.includes("DEFICIENCIA") || quotaNormalized.includes("PCD");
 
-    // 2. Grade Calculation
+    // 2. Grade Calculation - Ignora notas em branco
     let sum6 = 0, sum7 = 0, sum8 = 0;
-    let sumPort = 0;
-    let sumMat = 0;
+    let count6 = 0, count7 = 0, count8 = 0;
+    let sumPort = 0, countPort = 0;
+    let sumMat = 0, countMat = 0;
 
     SUBJECTS.forEach(sub => {
       const r6 = getGradeValue(row, sub, "6º ANO");
@@ -131,16 +136,26 @@ export const processCSV = (csvText: string): ProcessingSummary => {
       if (r7.warning) warnings.push(`${sub} 7º: ${r7.warning}`);
       if (r8.warning) warnings.push(`${sub} 8º: ${r8.warning}`);
 
-      sum6 += r6.value;
-      sum7 += r7.value;
-      sum8 += r8.value;
+      // Só soma se não for nota em branco
+      if (!r6.isBlank) { sum6 += r6.value; count6++; }
+      if (!r7.isBlank) { sum7 += r7.value; count7++; }
+      if (!r8.isBlank) { sum8 += r8.value; count8++; }
 
-      if (sub === "PORTUGUÊS") sumPort += (r6.value + r7.value + r8.value);
-      if (sub === "MATEMÁTICA") sumMat += (r6.value + r7.value + r8.value);
+      if (sub === "PORTUGUÊS") {
+        if (!r6.isBlank) { sumPort += r6.value; countPort++; }
+        if (!r7.isBlank) { sumPort += r7.value; countPort++; }
+        if (!r8.isBlank) { sumPort += r8.value; countPort++; }
+      }
+      if (sub === "MATEMÁTICA") {
+        if (!r6.isBlank) { sumMat += r6.value; countMat++; }
+        if (!r7.isBlank) { sumMat += r7.value; countMat++; }
+        if (!r8.isBlank) { sumMat += r8.value; countMat++; }
+      }
     });
 
     // 9th Grade is Bimesters 1, 2, 3
     let sum9 = 0;
+    let count9 = 0;
     SUBJECTS.forEach(sub => {
       const b1 = getGradeValue(row, sub, "1º BIMESTRE");
       const b2 = getGradeValue(row, sub, "2º BIMESTRE");
@@ -150,21 +165,43 @@ export const processCSV = (csvText: string): ProcessingSummary => {
       if (b2.warning) warnings.push(`${sub} 9º-B2: ${b2.warning}`);
       if (b3.warning) warnings.push(`${sub} 9º-B3: ${b3.warning}`);
 
-      const avgSub9 = (b1.value + b2.value + b3.value) / 3;
-      sum9 += avgSub9;
+      // Calcula média do 9º ano para esta matéria (somente bimestres preenchidos)
+      const bimestres = [b1, b2, b3].filter(b => !b.isBlank);
+      if (bimestres.length > 0) {
+        const avgSub9 = bimestres.reduce((acc, b) => acc + b.value, 0) / bimestres.length;
+        sum9 += avgSub9;
+        count9++;
 
-      if (sub === "PORTUGUÊS") sumPort += avgSub9;
-      if (sub === "MATEMÁTICA") sumMat += avgSub9;
+        // Para Português e Matemática, soma cada bimestre individualmente
+        if (sub === "PORTUGUÊS") {
+          bimestres.forEach(b => { sumPort += b.value; countPort++; });
+        }
+        if (sub === "MATEMÁTICA") {
+          bimestres.forEach(b => { sumMat += b.value; countMat++; });
+        }
+      }
     });
 
-    const avg6th = SUBJECTS.length ? sum6 / SUBJECTS.length : 0;
-    const avg7th = SUBJECTS.length ? sum7 / SUBJECTS.length : 0;
-    const avg8th = SUBJECTS.length ? sum8 / SUBJECTS.length : 0;
-    const avg9th = SUBJECTS.length ? sum9 / SUBJECTS.length : 0;
+    // Calcula médias por ano (dividindo apenas pelo número de notas preenchidas)
+    const avg6th = count6 > 0 ? sum6 / count6 : 0;
+    const avg7th = count7 > 0 ? sum7 / count7 : 0;
+    const avg8th = count8 > 0 ? sum8 / count8 : 0;
+    const avg9th = count9 > 0 ? sum9 / count9 : 0;
 
-    const finalScore = (avg6th + avg7th + avg8th + avg9th) / 4;
-    const avgPort = sumPort / 4;
-    const avgMat = sumMat / 4;
+    // Calcula nota final (média dos anos que têm notas)
+    const anosComNota = [
+      { avg: avg6th, hasGrades: count6 > 0 },
+      { avg: avg7th, hasGrades: count7 > 0 },
+      { avg: avg8th, hasGrades: count8 > 0 },
+      { avg: avg9th, hasGrades: count9 > 0 },
+    ].filter(a => a.hasGrades);
+
+    const finalScore = anosComNota.length > 0
+      ? anosComNota.reduce((acc, a) => acc + a.avg, 0) / anosComNota.length
+      : 0;
+
+    const avgPort = countPort > 0 ? sumPort / countPort : 0;
+    const avgMat = countMat > 0 ? sumMat / countMat : 0;
 
     return {
       id: `${index}-${nameRaw}`,
